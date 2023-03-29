@@ -1,0 +1,71 @@
+#!/usr/bin/env python3
+from PyPDF2 import PdfReader
+from langchain.embeddings.openai import OpenAIEmbeddings
+from langchain.text_splitter import CharacterTextSplitter
+from langchain.chains.question_answering import load_qa_chain
+from langchain.llms import OpenAI
+from langchain.vectorstores import ElasticVectorSearch, Pinecone, Weaviate, FAISS
+import os
+from glob import glob
+import easyocr
+import cv2
+import os
+import pickle
+from dotenv import load_dotenv
+load_dotenv()
+
+STORE_FILE = 'store.faiss'
+
+text_splitter = CharacterTextSplitter(
+        separator = "\n",
+        chunk_size = 1000,
+        chunk_overlap = 200,
+        length_function = len,
+)
+
+def save_store(store):
+    store.save_local(STORE_FILE)
+
+def get_store(file, texts):
+    if not os.path.exists(file):
+        store = FAISS.from_texts(texts, OpenAIEmbeddings())
+        save_store(store)
+        return store
+    return FAISS.load_local(STORE_FILE, OpenAIEmbeddings())
+
+def get_text_from_file(file):
+    with open(file, 'r') as f:
+        return f.read()
+
+def get_text_from_pdf(file):
+    reader = PdfReader(file)
+    raw_text = ''
+    for i, page in enumerate(reader.pages):
+        text = page.extract_text()
+        if text:
+            raw_text += text
+    return raw_text
+
+def get_text_from_image(file):
+    img = cv2.imread(file)
+    reader = easyocr.Reader(['en'])
+    result = reader.readtext(img, detail = 0, paragraph = True)
+    return os.linesep.join(result)
+
+def get_text_chunks_from_text(text):
+    return text_splitter.split_text(text)
+
+
+def add_texts_to_store(texts, store):
+    store.add_texts(texts)
+
+def run_me(query):
+    raw_text = get_text_from_pdf('alice30.pdf')
+    texts = get_text_chunks_from_text(raw_text)
+    store = get_store(STORE_FILE, texts)
+    docs = store.similarity_search(query)
+    chain = load_qa_chain(OpenAI(temperature=0), chain_type='stuff')
+    return chain.run(input_documents=docs, question=query)
+
+print(glob('data/**/*', recursive=True))
+# print(run_me('Who are the characters in this story?'))
