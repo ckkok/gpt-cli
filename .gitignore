@@ -2,3 +2,4 @@ store.faiss
 .env
 
 
+.DS_Store

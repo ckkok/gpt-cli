@@ -1,20 +1,28 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 from PyPDF2 import PdfReader
 from langchain.embeddings.openai import OpenAIEmbeddings
 from langchain.text_splitter import CharacterTextSplitter
 from langchain.chains.question_answering import load_qa_chain
 from langchain.llms import OpenAI
+from langchain.chat_models import ChatOpenAI
 from langchain.vectorstores import ElasticVectorSearch, Pinecone, Weaviate, FAISS
 import os
+import sys
+import xmltodict
+import shutil
+import requests
+from bs4 import BeautifulSoup
 from glob import glob
 import easyocr
 import cv2
 import os
 import pickle
+import pathlib
 from dotenv import load_dotenv
 load_dotenv()
 
 STORE_FILE = 'store.faiss'
+shutil.rmtree(STORE_FILE)
 
 text_splitter = CharacterTextSplitter(
         separator = "\n",
@@ -28,6 +36,8 @@ def save_store(store):
 
 def get_store(file, texts):
     if not os.path.exists(file):
+        if texts is None:
+            return None
         store = FAISS.from_texts(texts, OpenAIEmbeddings())
         save_store(store)
         return store
@@ -55,17 +65,45 @@ def get_text_from_image(file):
 def get_text_chunks_from_text(text):
     return text_splitter.split_text(text)
 
+def get_text_from_url(url):
+    html = requests.get(url).text
+    soup = BeautifulSoup(html, features='html.parser')
+    text = soup.get_text()
+    lines = (line.strip() for line in text.splitlines())
+    return os.linesep.join(line for line in lines if line)
 
 def add_texts_to_store(texts, store):
     store.add_texts(texts)
 
-def run_me(query):
-    raw_text = get_text_from_pdf('alice30.pdf')
-    texts = get_text_chunks_from_text(raw_text)
-    store = get_store(STORE_FILE, texts)
+def get_resources():
+    return [p for p in glob('data/**/*', recursive=True) if os.path.isfile(p)]
+
+def get_extension(file):
+    return pathlib.Path(file).suffix
+
+def another_run(query):
+    resources = get_resources()
+    store = get_store(STORE_FILE, None)
+    for file in resources:
+        print(f"Getting text from {file}")
+        ext = get_extension(file)
+        raw_text = ''
+        if ext == '.md' or ext == '.csv':
+            raw_text += get_text_from_file(file)
+        elif ext == '.pdf':
+            raw_text += get_text_from_pdf(file)
+        elif ext == '.jpg' or ext == '.png':
+            raw_text += get_text_from_image(file)
+        else:
+            print(f"Unrecognized extension: {ext}")
+            continue
+        texts = get_text_chunks_from_text(raw_text)
+        if store is None:
+            store = get_store(STORE_FILE, texts)
+            continue
+        add_texts_to_store(texts, store)
     docs = store.similarity_search(query)
-    chain = load_qa_chain(OpenAI(temperature=0), chain_type='stuff')
+    chain = load_qa_chain(ChatOpenAI(temperature=0, model_name="gpt-3.5-turbo"), chain_type='stuff')
     return chain.run(input_documents=docs, question=query)
 
-print(glob('data/**/*', recursive=True))
-# print(run_me('Who are the characters in this story?'))
+print(another_run(sys.argv[1]))
