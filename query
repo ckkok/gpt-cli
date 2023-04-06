@@ -22,7 +22,10 @@ from dotenv import load_dotenv
 load_dotenv()
 
 STORE_FILE = 'store.faiss'
-shutil.rmtree(STORE_FILE)
+try:
+    shutil.rmtree(STORE_FILE)
+except:
+    pass
 
 text_splitter = CharacterTextSplitter(
         separator = "\n",
